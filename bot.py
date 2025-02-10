@@ -1,6 +1,5 @@
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 from telegram import (
@@ -23,7 +22,8 @@ load_dotenv()
 
 TRANSLATION, CONFIRM, SAVE = range(3)
 
-DICTIONRY = {}
+with open('dump.json', 'r') as f:
+    DICTIONRY = json.loads(f.read())
 
 
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -58,16 +58,23 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.callback_query.edit_message_text(
+        f'{context.user_data['word']} - {context.user_data['translation']}'
+        '\nСохранено. Добавить еще? /add',
+    )
     DICTIONRY[context.user_data['word']] = context.user_data['translation']
     context.user_data.pop('word')
     context.user_data.pop('translation')
-    with open(f'dump{int(time.time())}.json', 'w') as f:
+    with open(f'dump.json', 'w') as f:
         f.write(json.dumps(DICTIONRY, indent=4))
     await update.callback_query.answer('👍')
     return ConversationHandler.END
 
 
 async def no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.callback_query.edit_message_text(
+        'Добавить другое слово? /add',
+    )
     context.user_data.pop('word')
     context.user_data.pop('translation')
     await update.callback_query.answer('👍')
