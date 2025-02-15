@@ -174,6 +174,13 @@ class WordPrioritySystem:
         self.words = words
         self.stats = defaultdict(lambda: {'shown': 0, 'correct': 0})
 
+        # Загружаем статистику из базы данных
+        for idx, word in enumerate(self.words):
+            if 'shown' in word:
+                self.stats[idx]['shown'] = word['shown']
+            if 'correct' in word:
+                self.stats[idx]['correct'] = word['correct']
+
     def get_next_word_id(self):
         # Вычисляем приоритет для каждого слова
         priorities = []
