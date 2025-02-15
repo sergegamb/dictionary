@@ -1,5 +1,9 @@
 import json
 import os
+import random
+from collections import defaultdict
+
+random.seed(4)
 
 from dotenv import load_dotenv
 from telegram import (
@@ -15,6 +19,7 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     filters,
+    PollHandler,
 )
 
 
@@ -157,6 +162,110 @@ async def word(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.callback_query.answer(DICTIONRY[word])
 
 
+# Загрузка базы данных
+with open('arm.json') as f:
+    DATABASE = json.loads(f.read())
+
+# Словарь для быстрого поиска индекса слова по армянскому слову
+DICT = {word['armenian']: idx for idx, word in enumerate(DATABASE['words'])}
+
+class WordPrioritySystem:
+    def __init__(self, words):
+        self.words = words
+        self.stats = defaultdict(lambda: {'shown': 0, 'correct': 0})
+
+    def get_next_word_id(self):
+        # Вычисляем приоритет для каждого слова
+        priorities = []
+        for idx, word in enumerate(self.words):
+            shown = self.stats[idx]['shown']
+            correct = self.stats[idx]['correct']
+
+            if shown == 0:
+                # Если слово еще не показывалось, оно имеет высокий приоритет
+                priority = 1.0
+            else:
+                # Приоритет зависит от процента правильных ответов
+                accuracy = correct / shown
+                priority = 1.0 - accuracy
+
+            priorities.append((idx, priority))
+
+        # Нормализуем приоритеты
+        total_priority = sum(priority for _, priority in priorities)
+        normalized_priorities = [(idx, priority / total_priority) for idx, priority in priorities]
+
+        # Выбираем слово на основе приоритетов
+        ids, weights = zip(*normalized_priorities)
+        return random.choices(ids, weights=weights, k=1)[0]
+
+    def update_stats(self, word_id, is_correct):
+        self.stats[word_id]['shown'] += 1
+        if is_correct:
+            self.stats[word_id]['correct'] += 1
+
+# Инициализация системы приоритизации
+word_system = WordPrioritySystem(DATABASE['words'])
+
+def get_word(word_id):
+    return DATABASE['words'][word_id]['armenian']
+
+def get_russian_word(word_id):
+    return DATABASE['words'][word_id]['russian']
+
+def get_options(word_id):
+    options_id = set({word_id})
+    while len(options_id) < 4:
+        options_id.add(random.randrange(len(DATABASE['words'])))
+    return [get_russian_word(option_id) for option_id in options_id]
+
+def get_correct_option_id(options, word_id):
+    correct_word = get_russian_word(word_id)
+    return options.index(correct_word)
+
+async def armenian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Получаем следующее слово с учетом приоритетов
+    word_id = word_system.get_next_word_id()
+    word = get_word(word_id)
+    options = get_options(word_id)
+
+    # Отправляем опрос
+    await update.message.reply_poll(
+        word,
+        options,
+        type='quiz',
+        correct_option_id=get_correct_option_id(options, word_id),
+    )
+
+async def receive_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Получаем ID слова из вопроса
+    word_id = DICT[update.poll.question]
+
+    # Обновляем статистику
+    is_correct = update.poll.options[update.poll.correct_option_id].voter_count > 0
+    word_system.update_stats(word_id, is_correct)
+
+    # Сохраняем обновленную статистику в базу данных
+    DATABASE['words'][word_id]['shown'] = word_system.stats[word_id]['shown']
+    DATABASE['words'][word_id]['correct'] = word_system.stats[word_id]['correct']
+
+    # Сохраняем обновленную базу данных в файл
+    with open('arm.json', 'w') as f:
+        json.dump(DATABASE, f, indent=4)
+
+    word_id = word_system.get_next_word_id()
+    word = get_word(word_id)
+    options = get_options(word_id)
+
+    await context.bot.send_poll(
+        7602306060,
+        word,
+        options,
+        type='quiz',
+        correct_option_id=get_correct_option_id(options, word_id),
+    )
+
+
 app = ApplicationBuilder().token(os.getenv('TOKEN')).build()
 
 app.add_handler(CommandHandler('hello', hello))
@@ -169,9 +278,11 @@ app.add_handler(ConversationHandler(
     },
     []
 ))
-app.add_handler(CommandHandler("words", words))
+app.add_handler(CommandHandler('words', words))
 app.add_handler(CallbackQueryHandler(word, 'word'))
 app.add_handler(CallbackQueryHandler(next_page, 'next_page'))
 app.add_handler(CallbackQueryHandler(previous_page, 'previous_page'))
+app.add_handler(CommandHandler('armenian', armenian))
+app.add_handler(PollHandler(receive_quiz_answer))
 
 app.run_polling()
