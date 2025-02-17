@@ -194,9 +194,10 @@ class WordPrioritySystem:
                 # Если слово еще не показывалось, оно имеет высокий приоритет
                 priority = 1.0
             else:
-                # Приоритет зависит от процента правильных ответов
+                # Приоритет зависит от процента правильных ответов и количества показов
                 accuracy = correct / shown
-                priority = 1.0 - accuracy
+                rarity_boost = 1.0 / (shown + 1)
+                priority = (1.0 - accuracy) + rarity_boost
 
             priorities.append((idx, priority))
 
