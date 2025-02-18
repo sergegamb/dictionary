@@ -1,4 +1,5 @@
 import json
+import time
 import os
 import random
 from collections import defaultdict
@@ -168,6 +169,7 @@ with open('arm.json') as f:
 
 # Словарь для быстрого поиска индекса слова по армянскому слову
 DICT = {word['armenian']: idx for idx, word in enumerate(DATABASE['words'])}
+DICT.update({word['russian']: idx for idx, word in enumerate(DATABASE['words'])})
 
 class WordPrioritySystem:
     def __init__(self, words):
@@ -226,9 +228,21 @@ def get_options(word_id):
         options_id.add(random.randrange(len(DATABASE['words'])))
     return [get_russian_word(option_id) for option_id in options_id]
 
+def get_armenian_options(word_id):
+    options_id = set({word_id})
+    while len(options_id) < 4:
+        options_id.add(random.randrange(len(DATABASE['words'])))
+    return [get_word(option_id) for option_id in options_id]
+
 def get_correct_option_id(options, word_id):
     correct_word = get_russian_word(word_id)
     return options.index(correct_word)
+
+def get_correct_armenian_option_id(options, word_id):
+    correct_word = get_word(word_id)
+    return options.index(correct_word)
+
+MODE = 'armenian'
 
 async def armenian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Получаем следующее слово с учетом приоритетов
@@ -236,12 +250,34 @@ async def armenian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     word = get_word(word_id)
     options = get_options(word_id)
 
+    global MODE
+    MODE = 'armenian'
+
     # Отправляем опрос
-    await update.message.reply_poll(
+    await context.bot.send_poll(
+        7602306060,
         word,
         options,
         type='quiz',
         correct_option_id=get_correct_option_id(options, word_id),
+    )
+
+async def russian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Получаем следующее слово с учетом приоритетов
+    word_id = word_system.get_next_word_id()
+    word = get_russian_word(word_id)
+    options = get_armenian_options(word_id)
+
+    global MODE
+    MODE = 'russian'
+
+    # Отправляем опрос
+    await context.bot.send_poll(
+        7602306060,
+        word,
+        options,
+        type='quiz',
+        correct_option_id=get_correct_armenian_option_id(options, word_id),
     )
 
 async def receive_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -260,17 +296,13 @@ async def receive_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE
     with open('arm.json', 'w') as f:
         json.dump(DATABASE, f, indent=4)
 
-    word_id = word_system.get_next_word_id()
-    word = get_word(word_id)
-    options = get_options(word_id)
+    if not is_correct:
+        time.sleep(1)
 
-    await context.bot.send_poll(
-        7602306060,
-        word,
-        options,
-        type='quiz',
-        correct_option_id=get_correct_option_id(options, word_id),
-    )
+    if MODE == 'armenian':
+        await armenian(update, context)
+    elif MODE == 'russian':
+        await russian(update, context)
 
 
 app = ApplicationBuilder().token(os.getenv('TOKEN')).build()
@@ -290,6 +322,7 @@ app.add_handler(CallbackQueryHandler(word, 'word'))
 app.add_handler(CallbackQueryHandler(next_page, 'next_page'))
 app.add_handler(CallbackQueryHandler(previous_page, 'previous_page'))
 app.add_handler(CommandHandler('armenian', armenian))
+app.add_handler(CommandHandler('russian', russian))
 app.add_handler(PollHandler(receive_quiz_answer))
 
 app.run_polling()
